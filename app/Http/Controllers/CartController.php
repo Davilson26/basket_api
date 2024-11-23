@@ -4,27 +4,52 @@ namespace App\Http\Controllers;
 
 use App\Models\Cart;
 use App\Models\CartItems;
+use App\Services\UserService;
 use App\Services\ProductService;
+use App\Services\PaymentService;
+use App\Services\OrderService;
 use Illuminate\Http\Request;
 
 class CartController extends Controller
 {
+    protected $userService;
     protected $productService;
+    protected $paymentService;
+    protected $orderService;
 
-    public function __construct(ProductService $productService)
+    public function __construct(UserService $userService, ProductService $productService, PaymentService $paymentService, OrderService $orderService)
     {
+        $this->userService = $userService;
         $this->productService = $productService;
+        $this->paymentService = $paymentService;
+        $this->orderService = $orderService;
     }
 
-     /**
+    private function getUserIdFromToken(Request $request)
+    {
+        $token = $request->header('Authorization');
+        $validation = $this->userService->validateSesion($token);
+
+        if (!$validation['success']) {
+            response()->json(['error' => 'Sesión no activa o token inválido'], 401)->send();
+            exit; // Terminar ejecución si el token no es válido
+        }
+
+        return $validation;
+    }
+
+    /**
      * Agregar producto al carrito
      */
     public function addToCart(Request $request)
     {
+        // verificar usuario logueado
+        $this->getUserIdFromToken($request);
+
         // Obtener los detalles del producto desde el microservicio SOAP
         $productDetails = $this->productService->getProductById($request->product_id);
-        
-        if ($productDetails['id']==null) {
+
+        if ($productDetails['id'] == null) {
             return response()->json(['message' => 'Producto no encontrado.'], 404);
         }
 
@@ -53,6 +78,9 @@ class CartController extends Controller
      */
     public function updateCart(Request $request)
     {
+        // verificar usuario logueado
+        $this->getUserIdFromToken($request);
+
         // Obtener el producto desde el servicio SOAP
         $productDetails = $this->productService->getProductById($request->product_id);
 
@@ -69,8 +97,8 @@ class CartController extends Controller
 
         // Buscar el item en el carrito
         $cartItem = CartItems::where('cart_id', $cart->id)
-                            ->where('product_id', $request->product_id)
-                            ->first();
+            ->where('product_id', $request->product_id)
+            ->first();
 
         if (!$cartItem) {
             return response()->json(['message' => 'Producto no encontrado en el carrito.'], 404);
@@ -89,6 +117,9 @@ class CartController extends Controller
      */
     public function removeFromCart(Request $request)
     {
+        // verificar usuario logueado
+        $this->getUserIdFromToken($request);
+
         // Buscar el carrito del usuario
         $cart = Cart::where('user_id', $request->user_id)->first();
 
@@ -98,8 +129,8 @@ class CartController extends Controller
 
         // Buscar el item en el carrito y eliminarlo
         $cartItem = CartItems::where('cart_id', $cart->id)
-                            ->where('product_id', $request->product_id)
-                            ->first();
+            ->where('product_id', $request->product_id)
+            ->first();
 
         if (!$cartItem) {
             return response()->json(['message' => 'Producto no encontrado en el carrito.'], 404);
@@ -116,6 +147,10 @@ class CartController extends Controller
      */
     public function showCart(Request $request)
     {
+        // verificar usuario logueado
+        $this->getUserIdFromToken($request);
+
+
         // Cargar el carrito junto con los cartItems
         $cart = Cart::with('cartItems')->where('user_id', $request->user_id)->first();
 
@@ -135,6 +170,10 @@ class CartController extends Controller
 
     public function paymentCart(Request $request)
     {
+        // verificar usuario logueado
+        $tokenValidation = $this->getUserIdFromToken($request);
+        $token = $tokenValidation['token'];
+
         // Llamar a showCart para obtener la información del carrito del usuario
         $cart = Cart::with('cartItems')->where('user_id', $request->user_id)->first();
 
@@ -149,7 +188,6 @@ class CartController extends Controller
 
         // Preparar datos de pago
         $paymentData = [
-            'user_id' => $request->user_id,
             'total_amount' => $total,
             'payment_method' => [
                 'card_number' => $request->payment_method['card_number'],
@@ -161,11 +199,17 @@ class CartController extends Controller
         ];
 
         // Llamada a la API externa para procesar el pago
-        $response = $this->processPayment($paymentData);
+        $response = $this->paymentService->processPayment($paymentData, $token);
 
-        dd($response);
         // Verificar si el pago fue exitoso
         if ($response['status'] === 'success') {
+
+            $user_id = $request->user_id;
+            $total = $paymentData['total_amount'];
+            $cartItems = $cart->cartItems;
+
+            $this->orderService->createOrder($user_id, $cartItems, $total, $token);
+
             return response()->json([
                 'message' => 'Pago realizado con éxito.',
                 'transaction_id' => $response['transaction_id'],
@@ -178,26 +222,4 @@ class CartController extends Controller
             ], 500);
         }
     }
-
-
-    private function processPayment($paymentData)
-    {
-
-        $url = 'http://127.0.0.1:8001/api/payments/process';
-
-        $client = new \GuzzleHttp\Client();
-        try {
-            $response = $client->post($url, [
-                'json' => $paymentData
-            ]);
-            $body = json_decode($response->getBody(), true);
-            return $body;
-        } catch (\Exception $e) {
-            return [
-                'status' => 'error',
-                'error' => $e->getMessage()
-            ];
-        }
-    }
-
 }
