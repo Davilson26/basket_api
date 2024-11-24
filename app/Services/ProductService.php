@@ -10,7 +10,7 @@ class ProductService
 
     public function __construct()
     {
-        $this->wsdlUrl = 'http://localhost/catagolos_api/ProductoSoap.php';
+        $this->wsdlUrl = 'http://localhost:8001/ProductoSoap.php';
     }
 
     /**

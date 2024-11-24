@@ -10,9 +10,9 @@ class PaymentService
     /**
      * Realizar un pago
      */
-    public function processPayment($paymentData, $token)
+    public function processPayment($paymentData)
     {
-        $url = 'http://localhost:8002/api/payments/process';
+        $url = 'http://localhost:8000/api/payments/process';
 
         $client = new \GuzzleHttp\Client();
         try {
@@ -20,9 +20,6 @@ class PaymentService
                 $url,
                 [
                     'json' => $paymentData,
-                    'headers' => [
-                        'Authorization' => $token
-                    ]
                 ]
             );
             $body = json_decode($response->getBody(), true);

@@ -27,7 +27,7 @@ class CartController extends Controller
 
     private function getUserIdFromToken(Request $request)
     {
-        $token = $request->header('Authorization');
+        $token = $request->header('authorization');
         $validation = $this->userService->validateSesion($token);
 
         if (!$validation['success']) {
@@ -171,8 +171,7 @@ class CartController extends Controller
     public function paymentCart(Request $request)
     {
         // verificar usuario logueado
-        $tokenValidation = $this->getUserIdFromToken($request);
-        $token = $tokenValidation['token'];
+        $this->getUserIdFromToken($request);
 
         // Llamar a showCart para obtener la información del carrito del usuario
         $cart = Cart::with('cartItems')->where('user_id', $request->user_id)->first();
@@ -191,24 +190,32 @@ class CartController extends Controller
             'total_amount' => $total,
             'payment_method' => [
                 'card_number' => $request->payment_method['card_number'],
-                'expiry_date' => $request->payment_method['expiry_date'],
+                'card_holder' => $request->payment_method['card_holder'],
                 'card_type' => $request->payment_method['card_type'],
-                'cvv' => $request->payment_method['cvv'],
-                'cardholder_name' => $request->payment_method['cardholder_name']
+                'expiry_date' => $request->payment_method['expiry_date'],
+                'cvv' => $request->payment_method['cvv']
             ]
         ];
 
         // Llamada a la API externa para procesar el pago
-        $response = $this->paymentService->processPayment($paymentData, $token);
+        $response = $this->paymentService->processPayment($paymentData);
 
         // Verificar si el pago fue exitoso
         if ($response['status'] === 'success') {
 
-            $user_id = $request->user_id;
-            $total = $paymentData['total_amount'];
+            $userId = $request->user_id;
+            $total = $total;
             $cartItems = $cart->cartItems;
 
-            $this->orderService->createOrder($user_id, $cartItems, $total, $token);
+            $newOrder = $this->orderService->createOrder($userId, $cartItems, $total);
+
+            dd($newOrder);
+
+            // Eliminar los elementos del carrito asociados al carrito del usuario
+            CartItems::whereIn('cart_id', Cart::where('user_id', $userId)->pluck('id'))->delete();
+
+            // Eliminar el carrito asociado al usuario
+            Cart::where('user_id', $userId)->delete();
 
             return response()->json([
                 'message' => 'Pago realizado con éxito.',

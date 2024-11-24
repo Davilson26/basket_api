@@ -10,32 +10,32 @@ class OrderService
     /**
      * Realizar un pago
      */
-    public function createOrder($user_id, $cartItems, $total, $token)
+    public function createOrder($userId, $cartItems, $total)
     {
-        $url = 'http://localhost:8004/api/newOrder';
+        $url = 'http://localhost:8004/api/orders/newOrder';
 
         $client = new \GuzzleHttp\Client();
 
-        // Convertir los cartItems
-        $items = collect($cartItems)->map(function ($item) {
+        // Crear el array de items
+        $items = $cartItems->map(function ($item) {
             return [
                 'product_id' => $item->product_id,
                 'quantity' => $item->quantity,
             ];
-        })->toArray();
+        })->toArray(); // Convertir a array regular
 
         try {
             $response = $client->post(
                 $url,
                 [
                     'json' => [
-                        'user_id' => $user_id,
-                        'items' => $items,
-                        'total' => $total
+                        'user_id' => $userId,
+                        'total_amount' => $total,
+                        'items' => $items
                     ],
-                    'headers' => [
-                        'Authorization' => $token
-                    ]
+               /*      'headers' => [
+                        'Authorization' => $token,
+                    ] */
                 ]
             );
             $body = json_decode($response->getBody(), true);
