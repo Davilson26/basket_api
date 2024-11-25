@@ -147,9 +147,9 @@ class CartController extends Controller
      */
     public function showCart(Request $request)
     {
+
         // verificar usuario logueado
         $this->getUserIdFromToken($request);
-
 
         // Cargar el carrito junto con los cartItems
         $cart = Cart::with('cartItems')->where('user_id', $request->user_id)->first();
@@ -170,63 +170,71 @@ class CartController extends Controller
 
     public function paymentCart(Request $request)
     {
-        // verificar usuario logueado
-        $this->getUserIdFromToken($request);
+        try {
+            // verificar usuario logueado
+            $this->getUserIdFromToken($request);
 
-        // Llamar a showCart para obtener la información del carrito del usuario
-        $cart = Cart::with('cartItems')->where('user_id', $request->user_id)->first();
+            // Llamar a showCart para obtener la información del carrito del usuario
+            $cart = Cart::with('cartItems')->where('user_id', $request->user_id)->first();
 
-        if (!$cart || !$cart->cartItems) {
-            return response()->json(['message' => 'Carrito vacío.'], 404);
+            if (!$cart || !$cart->cartItems) {
+                return response()->json(['message' => 'Carrito vacío.'], 404);
+            }
+
+            // Calcular el total del carrito
+            $total = $cart->cartItems->reduce(function ($carry, $item) {
+                return $carry + ($item->price * $item->quantity);
+            }, 0);
+
+            // Preparar datos de pago
+            $paymentData = [
+                'total_amount' => $total,
+                'payment_method' => [
+                    'card_number' => $request->payment_method['card_number'],
+                    'card_holder' => $request->payment_method['card_holder'],
+                    'card_type' => $request->payment_method['card_type'],
+                    'expiry_date' => $request->payment_method['expiry_date'],
+                    'cvv' => $request->payment_method['cvv']
+                ]
+            ];
+
+            // Llamada a la API externa para procesar el pago
+            $response = $this->paymentService->processPayment($paymentData);
+
+            // Verificar si el pago fue exitoso
+            if ($response['status'] === 'success') {
+
+                $userId = $request->user_id;
+                $totalAmount = $total;
+                $cartItems = $cart->cartItems;
+
+
+                // Llamada a la API externa para gestionar el pedido
+                $this->orderService->createOrder($userId, $cartItems, $totalAmount);
+
+                // Eliminar los elementos del carrito asociados al carrito del usuario
+                CartItems::whereIn('cart_id', Cart::where('user_id', $userId)->pluck('id'))->delete();
+
+                // Eliminar el carrito asociado al usuario
+                Cart::where('user_id', $userId)->delete();
+
+                return response()->json([
+                    'message' => 'Pago realizado con éxito.',
+                    'transaction_id' => $response['transaction_id'],
+                    'amount' => $total
+                ], 200);
+            } else {
+                return response()->json([
+                    'message' => 'El pago no pudo ser procesado.',
+                    'error' => $response['error']
+                ], 500);
+            }
+        } catch (\Exception $e) {
+            return [
+                'status' => 'error',
+                'error' => $e->getMessage()
+            ];
         }
 
-        // Calcular el total del carrito
-        $total = $cart->cartItems->reduce(function ($carry, $item) {
-            return $carry + ($item->price * $item->quantity);
-        }, 0);
-
-        // Preparar datos de pago
-        $paymentData = [
-            'total_amount' => $total,
-            'payment_method' => [
-                'card_number' => $request->payment_method['card_number'],
-                'card_holder' => $request->payment_method['card_holder'],
-                'card_type' => $request->payment_method['card_type'],
-                'expiry_date' => $request->payment_method['expiry_date'],
-                'cvv' => $request->payment_method['cvv']
-            ]
-        ];
-
-        // Llamada a la API externa para procesar el pago
-        $response = $this->paymentService->processPayment($paymentData);
-
-        // Verificar si el pago fue exitoso
-        if ($response['status'] === 'success') {
-
-            $userId = $request->user_id;
-            $total = $total;
-            $cartItems = $cart->cartItems;
-
-            $newOrder = $this->orderService->createOrder($userId, $cartItems, $total);
-
-            dd($newOrder);
-
-            // Eliminar los elementos del carrito asociados al carrito del usuario
-            CartItems::whereIn('cart_id', Cart::where('user_id', $userId)->pluck('id'))->delete();
-
-            // Eliminar el carrito asociado al usuario
-            Cart::where('user_id', $userId)->delete();
-
-            return response()->json([
-                'message' => 'Pago realizado con éxito.',
-                'transaction_id' => $response['transaction_id'],
-                'amount' => $total
-            ], 200);
-        } else {
-            return response()->json([
-                'message' => 'El pago no pudo ser procesado.',
-                'error' => $response['error']
-            ], 500);
-        }
     }
 }
